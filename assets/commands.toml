@@ -1,0 +1,15 @@
+[details]
+name = "Splat"
+logging = true
+select = "Random"
+
+
+[[command]]
+cmd = "ls"
+steps = 1
+stdout = "/tmp/ls.out"
+
+[[command]]
+cmd = "pwd"
+steps = 1
+stderr = "/tmp/pwd.err"
