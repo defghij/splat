@@ -124,3 +124,21 @@ mod shape {
       uniform across jobs
     */
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn get(name: &str) -> PathBuf {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_PATH"));
+        path.pop(); // remove `Cargo.toml`
+        path.push("assets/"); 
+        path.push(name);
+        path
+    }
+
+    #[test]
+    fn read_parse_good_file() {
+        let _config = read_configuration(get("commands.toml")).expect("File should be present and valid");
+    }
+}
