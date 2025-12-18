@@ -1,0 +1,18 @@
+[details]
+name = "Splat"
+logging = true
+
+[details.shape]
+select = "Random"
+steps = 64
+
+
+[[command]]
+cmd = "ls"
+stdout = "/tmp/ls.out"
+value = 50
+
+[[command]]
+cmd = "pwd"
+stderr = "/tmp/pwd.err"
+value = 50
