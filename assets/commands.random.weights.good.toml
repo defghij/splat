@@ -3,8 +3,9 @@ name = "Splat"
 logging = true
 
 [details.shape]
-select = "Random"
-steps = 64
+select   = "Random"
+steps    = 64
+parallel = 1
 
 
 [[command]]

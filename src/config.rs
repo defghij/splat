@@ -26,24 +26,31 @@ struct Unvalidated(Config);
 impl Unvalidated {
     fn validate(&self) -> Result<&Config, ConfigError> {
         let config = &self.0;
-        if !config.details.name.is_ascii() { 
-            return Err(ConfigError::Validation("Session name must be ascii"));
-        }
+        config.details.validate()?;
+
         if config.commands.is_empty() {
             return Err(ConfigError::Validation("At least on Job must be supplied")); 
         }
 
+        let total_value = config.commands
+            .iter()
+            .fold(0, |acc, wt| acc + wt.value.unwrap_or(0) );
+
         match config.details.shape.select  {
             shape::Select::Random => {
-                let total_weight = config.commands
-                    .iter()
-                    .fold(0, |acc, wt| acc + wt.value.unwrap_or(0) );
-                if total_weight >= 101 {
+                if total_value >= 101 {
                     return Err(ConfigError::Validation("Provided Job weights exceed 100"));
                 }
             },
-            _ => {}
+            shape::Select::Linear |
+            shape::Select::Interleave => {
+                if total_value >= config.details.shape.steps {
+                    return Err(
+                        ConfigError::Validation("Individual Job steps exceeds Session total"));
+                }
+            },
         }
+
         Ok(config)
     }
 }
@@ -92,7 +99,7 @@ struct Job {
     /// the variant selected.
     ///
     /// TODO: Make this an enum or struct?
-    value: Option<u32>,
+    value: Option<u64>,
 } impl Into<std::process::Command> for Job {
     fn into(self) -> std::process::Command {
         todo!()
@@ -105,6 +112,7 @@ struct Session {
     name: String,
 
     /// Whether the base program should emit a logging file.
+    #[serde(default)]
     logging: bool,
 
     /// A optional wrapper command that will be prepended to each [Job]. 
@@ -121,6 +129,14 @@ struct Session {
 
     /// Defines the number and order of [Jobs] launched in a [Session].
     shape: shape::Shape,
+} impl Session {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !self.name.is_ascii() { 
+            return Err(ConfigError::Validation("Session name must be ascii"));
+        }
+
+        Ok(())
+    }
 }
 
 
@@ -157,16 +173,17 @@ mod shape {
         fn default() -> Self { Select::Interleave }
     }
 
-    #[derive(Clone, Debug, Deserialize, Validate)]
+    #[derive(Clone, Debug, Deserialize)]
     pub(super) struct Shape {
         /// The method of step/job selection for this [Session].
         #[serde(default)]
-        #[garde(skip)]
         pub select: Select, 
         
         /// The total steps in this [Session]. Note, this may be overridden by the [Job]. 
-        #[garde(range(min=0, max=u64::MAX))]
         pub steps: u64,
+
+        /// The number of steps that should be active at any particular point in time. 
+        pub parallel: u64,
     }
 
     /* Eventually include a "shape" for jobs so that the "randomness" can be tuned rather than
@@ -183,8 +200,9 @@ mod test {
     #[test]
     fn file_validation_fails() {
         let validation: Vec<(&str, Result<(),()>)> = vec![
-            ("commands.random.weights.bad.toml", Err(())),
-            ("select.variant.bad.toml", Err(())),
+            ("commands.random.weights.bad.toml",     Err(())),
+            ("commands.linear.total_steps.bad.toml", Err(())),
+            ("select.variant.bad.toml",              Err(())),
         ];
         validation.iter().for_each(|(file, _expected)| {
             let got = read_configuration(get(file));
@@ -194,12 +212,16 @@ mod test {
 
     #[test]
     fn file_validation_succeeds() {
-        let validation: Vec<(&str, Result<(),ConfigError>)> = vec![
-            ("commands.random.weights.good.toml", Ok(())),
+        let validation: Vec<&str> = vec![
+            "commands.random.weights.good.toml",
+            "commands.linear.total_steps.good.toml",
         ];
-        validation.iter().for_each(|(file, _expected)| {
+        validation.iter().for_each(|file| {
             let got = read_configuration(get(file));
-            assert!(got.is_ok())
+            if  got.is_err() {
+                println!("Failed: {file} with\t{:?}", got.err());
+                assert!(false)
+            }
         });
     }
 

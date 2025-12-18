@@ -1,0 +1,13 @@
+[details]
+name = "Splat"
+
+[details.shape]
+select   = "Linear"
+steps    = 128
+parallel =  8
+
+
+[[command]]
+cmd = "ls"
+value = 64
+
