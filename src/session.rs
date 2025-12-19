@@ -1,18 +1,41 @@
+///! This modules contains the types used for parsing and validation of a configuration file.
+///! These types are analogous to those in [crate::session::Session] but contain "holes" to provide
+///! space for details and interactions at different levels.
+///! 
+///! A configuration file is read in with [read_configuration]. This function is the point of parse
+///! and validation. The primary type for this is [Session]. It contains a [Details] and vector of
+///! commands ([Job]).
+
 use std::path::PathBuf;
 
 use serde::Deserialize;
 use thiserror::Error;
-use garde::Validate;
+//use garde::Validate;  // May revisit this.
 
-pub fn read_configuration(path: PathBuf) -> Result<Config, Error> {
-    let tentative_config: Unvalidated = path.try_into()?;
-    let validated = tentative_config.validate()?;
+/// Read in a toml file from a [PathBuf], attempt to validate it, and return. This function returns
+/// a configuration specific [Error] if the validation fails. Otherwise a [Session] is returned.
+pub fn read_configuration(path: PathBuf) -> Result<Session, Error> {
+    let config: Unvalidated = path.try_into()?;
+    Ok(config.validate()?
+             .finalize()?)
+}
 
-    Ok(validated.clone())
+/// Error type that captures to two ways that reading in and serializing a file into a toml-based
+/// structure may fail.
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Parse error: {0}")]
+    Parse(#[from] toml::de::Error),
+
+    #[error("Validation error: {0}")]
+    Validation(&'static str),
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct Config {
+pub struct Session {
     details: Details,
 
     #[serde(rename = "job")]
@@ -22,19 +45,18 @@ pub struct Config {
 /// Wrapper type used to isolate parsed/deserialized but unvalidated configuration from a
 /// [PathBuf].
 #[derive(Clone, Debug, Deserialize)]
-struct Unvalidated(Config);
+struct Unvalidated(Session);
 impl Unvalidated {
-    fn validate(&self) -> Result<&Config, Error> {
-        let config = &self.0;
-        config.details.validate()?;
+    fn validate(self) -> Result<Self, Error> {
+        self.0.details.validate()?;
 
-        if config.commands.is_empty() {
+        if self.0.commands.is_empty() {
             return Err(Error::Validation("At least on Job must be supplied")); 
         }
 
         self.check_value_constraints()?;
 
-        Ok(config)
+        Ok(self)
     }
 
     /// This checks whether the constraints between `step` and `select` in [shape::Shape] and
@@ -61,36 +83,39 @@ impl Unvalidated {
 
         Ok(())
     }
+
+    /// Uses the validated inner data to create a new Session which filters settings from the top
+    /// level `details` into the `commands`.
+    fn finalize(&mut self) -> Result<Session, Error> {
+    
+        // Only need to update Commands.
+        // Should figure out a way to copy or finalize only the "commands".
+        let session = Session {
+            details: self.0.details.clone(),
+            commands: Vec::new(),
+        };
+
+        Ok(session)
+    }
 }
 impl TryFrom<std::path::PathBuf> for Unvalidated {
     type Error = Error;
 
     fn try_from(value: std::path::PathBuf) -> Result<Self, Self::Error> {
         let bytes = std::fs::read(value).map_err(|e| Error::Io(e))?;
-        let raw_toml: Config = toml::from_slice(bytes.as_slice()).map_err(|e| Error::Parse(e))?;
+        let raw_toml: Session = toml::from_slice(bytes.as_slice()).map_err(|e| Error::Parse(e))?;
 
         Ok(Unvalidated(raw_toml))
     }
-}
-
-/// Error type that captures to two ways that reading in and serializing a file into a toml-based
-/// structure may fail.
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Parse error: {0}")]
-    Parse(#[from] toml::de::Error),
-
-    #[error("Validation error: {0}")]
-    Validation(&'static str),
 }
 
 #[derive(Clone, Debug, Deserialize)]
 struct Job {
     /// The string that describes the 
     cmd: String,
+
+    /// A wrapper that will be used instead of one, if any, provided at the [Session] level.
+    wrapper: Option<String>,
 
     /// The base path name for the STDOUT output. This will be appended to if there are multiple
     ///
@@ -118,14 +143,7 @@ struct Job {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct Details {
-    /// Name for the [Details]
-    name: String,
-
-    /// Whether the base program should emit a logging file.
-    #[serde(default)]
-    logging: bool,
-
+pub struct Optional {
     /// A optional wrapper command that will be prepended to each [Job]. 
     /// e.g. "time", "strace", "srun -N1"
     wrapper: Option<String>, // TODO: this should probably be an enum?
@@ -137,6 +155,20 @@ struct Details {
     /// Base path that should be used for STDERR files. This is inherited by all members. This may
     /// be overwritten by the [Job].
     stderr: Option<String>, // TODO: this should probably be an enum?
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct Details {
+    /// Name for the [Details]
+    name: String,
+
+    /// Whether the base program should emit a logging file.
+    #[serde(default)]
+    logging: bool,
+
+    #[serde(flatten)]
+    optional: Optional,
+
 
     /// Defines the number and order of [Jobs] launched in a Session.
     shape: shape::Shape,
@@ -147,15 +179,15 @@ struct Details {
         if !self.name.is_ascii() { 
             return Err(Error::Validation("Session name must be ascii"));
         }
-        if self.wrapper.as_ref().is_some_and(|s| !s.is_ascii()) {
-            return Err(Error::Validation("Session's wrapper must be ascii"));
-        }
-        if self.stdout.as_ref().is_some_and(|s| !s.is_ascii()) {
-            return Err(Error::Validation("Session's stdout must be ascii"));
-        }
-        if self.stderr.as_ref().is_some_and(|s| !s.is_ascii()) {
-            return Err(Error::Validation("Session's stderr must be ascii"));
-        }
+        //if self.wrapper.as_ref().is_some_and(|s| !s.is_ascii()) {
+            //return Err(Error::Validation("Session's wrapper must be ascii"));
+        //}
+        //if self.stdout.as_ref().is_some_and(|s| !s.is_ascii()) {
+            //return Err(Error::Validation("Session's stdout must be ascii"));
+        //}
+        //if self.stderr.as_ref().is_some_and(|s| !s.is_ascii()) {
+            //return Err(Error::Validation("Session's stderr must be ascii"));
+        //}
 
         self.shape.validate()?;
         Ok(())
@@ -169,7 +201,7 @@ mod shape {
     ///
     #[derive(Clone, Debug, Deserialize)]
     pub(super) enum Select {
-        /// Randomly select the next job from the provided jobs in the [Config].
+        /// Randomly select the next job from the provided jobs in the [Session].
         /// The probability that the next step will belong to any particular [Job] is determined by
         /// that [Job]. Weights should total 100.
         ///
@@ -179,7 +211,7 @@ mod shape {
         Random,
 
         /// The next step should be pulled from the current [Job] unless its step count is
-        /// exhausted. If so, pull from the next [Job] in the [Config]. The steps from the next job
+        /// exhausted. If so, pull from the next [Job] in the [Session]. The steps from the next job
         /// will not be pulled until the current [Job] is exhausted.
         /// 
         /// An error will halt all steps if an error is encountered.

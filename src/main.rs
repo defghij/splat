@@ -1,7 +1,9 @@
-mod config;
+
+mod session;
 
 fn main() {
-
-    let config = config::read_configuration("../assets/commands.toml".into()).unwrap();
+    let config = session::read_configuration("../assets/commands.toml".into())
+        .unwrap();
     println!("{config:?}");
+
 }
