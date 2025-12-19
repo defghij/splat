@@ -1,19 +1,15 @@
 [details]
 name = "Splat"
 logging = true
-
-[details.shape]
-select   = "Random"
-steps    = 64
-parallel = 1
+shape = { select = "Random", steps  = 64, parallel = 1 }
 
 
-[[command]]
+[[job]]
 cmd = "ls"
 stdout = "/tmp/ls.out"
 value = 50
 
-[[command]]
+[[job]]
 cmd = "pwd"
 stderr = "/tmp/pwd.err"
 value = 50

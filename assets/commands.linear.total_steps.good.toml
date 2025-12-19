@@ -7,7 +7,7 @@ steps    = 128
 parallel =  8
 
 
-[[command]]
+[[job]]
 cmd = "ls"
 value = 64
 

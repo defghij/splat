@@ -4,7 +4,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use garde::Validate;
 
-pub fn read_configuration(path: PathBuf) -> Result<Config, ConfigError> {
+pub fn read_configuration(path: PathBuf) -> Result<Config, Error> {
     let tentative_config: Unvalidated = path.try_into()?;
     let validated = tentative_config.validate()?;
 
@@ -13,9 +13,9 @@ pub fn read_configuration(path: PathBuf) -> Result<Config, ConfigError> {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
-    details: Session,
+    details: Details,
 
-    #[serde(rename = "command")]
+    #[serde(rename = "job")]
     commands: Vec<Job>,
 }
 
@@ -24,42 +24,50 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize)]
 struct Unvalidated(Config);
 impl Unvalidated {
-    fn validate(&self) -> Result<&Config, ConfigError> {
+    fn validate(&self) -> Result<&Config, Error> {
         let config = &self.0;
         config.details.validate()?;
 
         if config.commands.is_empty() {
-            return Err(ConfigError::Validation("At least on Job must be supplied")); 
+            return Err(Error::Validation("At least on Job must be supplied")); 
         }
 
-        let total_value = config.commands
+        self.check_value_constraints()?;
+
+        Ok(config)
+    }
+
+    /// This checks whether the constraints between `step` and `select` in [shape::Shape] and
+    /// `value` in [Job] hold. If they do not hold, an error is returned.
+    fn check_value_constraints(&self) -> Result<(), Error> {
+        let total_value = self.0.commands
             .iter()
             .fold(0, |acc, wt| acc + wt.value.unwrap_or(0) );
 
-        match config.details.shape.select  {
+        match self.0.details.shape.select  {
             shape::Select::Random => {
                 if total_value >= 101 {
-                    return Err(ConfigError::Validation("Provided Job weights exceed 100"));
+                    return Err(Error::Validation("Provided Job weights exceed 100"));
                 }
             },
             shape::Select::Linear |
             shape::Select::Interleave => {
-                if total_value >= config.details.shape.steps {
+                if total_value >= self.0.details.shape.steps {
                     return Err(
-                        ConfigError::Validation("Individual Job steps exceeds Session total"));
+                        Error::Validation("Individual Job steps exceeds Session total"));
                 }
             },
         }
 
-        Ok(config)
+        Ok(())
     }
 }
 impl TryFrom<std::path::PathBuf> for Unvalidated {
-    type Error = ConfigError;
+    type Error = Error;
 
     fn try_from(value: std::path::PathBuf) -> Result<Self, Self::Error> {
-        let bytes = std::fs::read(value).map_err(|e| ConfigError::Io(e))?;
-        let raw_toml: Config = toml::from_slice(bytes.as_slice()).map_err(|e| ConfigError::Parse(e))?;
+        let bytes = std::fs::read(value).map_err(|e| Error::Io(e))?;
+        let raw_toml: Config = toml::from_slice(bytes.as_slice()).map_err(|e| Error::Parse(e))?;
 
         Ok(Unvalidated(raw_toml))
     }
@@ -68,7 +76,7 @@ impl TryFrom<std::path::PathBuf> for Unvalidated {
 /// Error type that captures to two ways that reading in and serializing a file into a toml-based
 /// structure may fail.
 #[derive(Debug, Error)]
-pub enum ConfigError {
+pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -100,15 +108,18 @@ struct Job {
     ///
     /// TODO: Make this an enum or struct?
     value: Option<u64>,
-} impl Into<std::process::Command> for Job {
-    fn into(self) -> std::process::Command {
-        todo!()
+} impl Job {
+    fn validate(&self) -> Result<(), Error> {
+        if self.stderr.as_ref().is_some_and(|s| !s.is_ascii()) {
+            return Err(Error::Validation("A Job's stderr must be ascii"));
+        }
+        Ok(())
     }
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct Session {
-    /// Name for the [Session]
+struct Details {
+    /// Name for the [Details]
     name: String,
 
     /// Whether the base program should emit a logging file.
@@ -117,28 +128,39 @@ struct Session {
 
     /// A optional wrapper command that will be prepended to each [Job]. 
     /// e.g. "time", "strace", "srun -N1"
-    wrapper: Option<String>,
+    wrapper: Option<String>, // TODO: this should probably be an enum?
 
     /// Base path that should be used for STDOUT files. This is inherited by all members. This may
     /// be overwritten by the [Job].
-    stdout: Option<String>,
+    stdout: Option<String>, // TODO: this should probably be an enum?
 
     /// Base path that should be used for STDERR files. This is inherited by all members. This may
     /// be overwritten by the [Job].
-    stderr: Option<String>,
+    stderr: Option<String>, // TODO: this should probably be an enum?
 
-    /// Defines the number and order of [Jobs] launched in a [Session].
+    /// Defines the number and order of [Jobs] launched in a Session.
     shape: shape::Shape,
-} impl Session {
-    fn validate(&self) -> Result<(), ConfigError> {
+} impl Details {
+    /// Validates basic features of the [Details] that do not depend on any external structure.
+    /// Currently, these validations are just "is it ascii?". This may change.
+    fn validate(&self) -> Result<(), Error> {
         if !self.name.is_ascii() { 
-            return Err(ConfigError::Validation("Session name must be ascii"));
+            return Err(Error::Validation("Session name must be ascii"));
+        }
+        if self.wrapper.as_ref().is_some_and(|s| !s.is_ascii()) {
+            return Err(Error::Validation("Session's wrapper must be ascii"));
+        }
+        if self.stdout.as_ref().is_some_and(|s| !s.is_ascii()) {
+            return Err(Error::Validation("Session's stdout must be ascii"));
+        }
+        if self.stderr.as_ref().is_some_and(|s| !s.is_ascii()) {
+            return Err(Error::Validation("Session's stderr must be ascii"));
         }
 
+        self.shape.validate()?;
         Ok(())
     }
 }
-
 
 mod shape {
     use super::*;
@@ -170,7 +192,7 @@ mod shape {
         /// An error does not halt execution.
         Interleave,
     } impl Default for Select {
-        fn default() -> Self { Select::Interleave }
+        fn default() -> Self { Select::Linear }
     }
 
     #[derive(Clone, Debug, Deserialize)]
@@ -184,6 +206,16 @@ mod shape {
 
         /// The number of steps that should be active at any particular point in time. 
         pub parallel: u64,
+    } impl Shape {
+        pub fn validate(&self) -> Result<(), Error> {
+            if self.steps == 0 || self.parallel == 0{
+                return Err(Error::Validation("`steps` and `parallel` must both be greater than zero"));
+            }
+            if self.steps < self.parallel {
+                return Err(Error::Validation("`parallel` may not exceed `steps`"));
+            }
+            Ok(())
+        }
     }
 
     /* Eventually include a "shape" for jobs so that the "randomness" can be tuned rather than
@@ -195,7 +227,6 @@ mod shape {
 #[cfg(test)]
 mod test {
     use super::*;
-
 
     #[test]
     fn file_validation_fails() {
