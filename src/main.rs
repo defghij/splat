@@ -2,8 +2,8 @@
 mod session;
 
 fn main() {
-    let config = session::read_configuration("../assets/commands.toml".into())
+    let session = session::create::from_path("../assets/commands.toml".into())
         .unwrap();
-    println!("{config:?}");
+    println!("{session:?}");
 
 }
