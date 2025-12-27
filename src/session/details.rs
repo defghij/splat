@@ -27,6 +27,7 @@ impl DetailsConfiguration {
     /// Validates basic features of the [Details] that do not depend on any external structure.
     /// Currently, these validations are just "is it ascii?". This may change.
     pub fn validate(&self) -> Result<(), CreationError> {
+        tracing::debug!("Doing validation on the configuration of the session details");
         if !self.name.is_ascii() { 
             return Err(CreationError::Validation("Session name must be ascii"));
         }

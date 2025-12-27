@@ -22,6 +22,8 @@ impl Unvalidated {
     /// This checks whether the constraints between `step` and `select` in [shape::Shape] and
     /// `value` in [Job] hold. If they do not hold, an error is returned.
     fn check_value_constraints(&self) -> Result<(), CreationError> {
+        tracing::debug!("Checking numerical constaints on the shape of jobs");
+
         let total_value = self.0.jobs
             .iter()
             .fold(0, |acc, wt| acc + wt.value.unwrap_or(0) );
@@ -47,6 +49,8 @@ impl TryFrom<std::path::PathBuf> for Unvalidated {
     type Error = CreationError;
 
     fn try_from(value: std::path::PathBuf) -> Result<Self, Self::Error> {
+        tracing::debug!("Converting PathBuf to an Unvalidated session");
+
         let bytes = std::fs::read(value).map_err(|e| Self::Error::Io(e))?;
         let raw_toml: SessionConfiguration = toml::from_slice(bytes.as_slice()).map_err(|e| Self::Error::Parse(e))?;
 
@@ -59,6 +63,8 @@ impl TryFrom<Unvalidated> for Validated {
     type Error = CreationError;
 
     fn try_from(value: Unvalidated) -> Result<Self, Self::Error> {
+        tracing::debug!("Converting an Unvalidated session to a validated Session");
+
         value.check_value_constraints()?;
 
         let SessionConfiguration { details, jobs } = value.0;
