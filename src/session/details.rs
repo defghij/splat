@@ -1,7 +1,13 @@
 use super::*;
 
+use modifiers::{ ModifiersConfiguration, Modifiers};
+use create::CreationError;
+
+pub type DetailsConfiguration = DetailBase<ModifiersConfiguration>;
+pub type Details = DetailBase<Modifiers>;
+
 #[derive(Clone, Debug, Deserialize)]
-pub struct Details {
+pub struct DetailBase<M> {
     /// Name for the [Details]
     pub name: String,
 
@@ -12,16 +18,17 @@ pub struct Details {
 
     /// Options to modify the commands provides in [Job]s of the [Session]. 
     #[serde(flatten)]
-    pub modifiers: job::Modifiers,
+    pub modifiers: M,
 
     /// Defines the number and order of [Jobs] launched in a Session.
     pub shape: Shape,
-} impl Details {
+} 
+impl DetailsConfiguration {
     /// Validates basic features of the [Details] that do not depend on any external structure.
     /// Currently, these validations are just "is it ascii?". This may change.
-    pub fn validate(&self) -> Result<(), CreateError> {
+    pub fn validate(&self) -> Result<(), CreationError> {
         if !self.name.is_ascii() { 
-            return Err(CreateError::Validation("Session name must be ascii"));
+            return Err(CreationError::Validation("Session name must be ascii"));
         }
 
         self.modifiers.validate()?;
@@ -29,6 +36,27 @@ pub struct Details {
         Ok(())
     }
 }
+impl TryFrom<DetailsConfiguration> for Details {
+    type Error = CreationError;
+
+    fn try_from(value: DetailsConfiguration) -> Result<Self, Self::Error> {
+        if !value.name.is_ascii() { 
+            return Err(CreationError::Validation("Session name must be ascii"));
+        }
+
+        value.modifiers.validate()?;
+        value.shape.validate()?;
+
+        Ok(Details { 
+            name:      value.name,
+            logging:   value.logging,
+            modifiers: value.modifiers.validate()?.clone().try_into()?,
+            shape:     value.shape.validate()?.clone()
+        })
+    }
+}
+
+
 
 
 /// The ways in which the next job may be selected.
@@ -57,7 +85,8 @@ pub enum Select {
     ///
     /// An error does not halt execution.
     Interleave,
-} impl Default for Select {
+} 
+impl Default for Select {
     fn default() -> Self { Select::Linear }
 }
 
@@ -72,14 +101,15 @@ pub struct Shape {
 
     /// The number of steps that should be active at any particular point in time. 
     pub parallel: u64,
-} impl Shape {
-    pub fn validate(&self) -> Result<(), CreateError> {
+} 
+impl Shape {
+    pub fn validate(&self) -> Result<&Self, CreationError> {
         if self.steps == 0 || self.parallel == 0{
-            return Err(CreateError::Validation("`steps` and `parallel` must both be greater than zero"));
+            return Err(CreationError::Validation("`steps` and `parallel` must both be greater than zero"));
         }
         if self.steps < self.parallel {
-            return Err(CreateError::Validation("`parallel` may not exceed `steps`"));
+            return Err(CreationError::Validation("`parallel` may not exceed `steps`"));
         }
-        Ok(())
+        Ok(self)
     }
 }

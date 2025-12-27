@@ -6,10 +6,18 @@ shape = { select = "Random", steps  = 64, parallel = 1 }
 
 [[job]]
 cmd = "ls"
-stdout = "/tmp/ls.out"
+stdout = { both = "/tmp/ls.out" }
+stderr = { file = "/tmp/ls.err" }
 value = 50
 
 [[job]]
 cmd = "pwd"
-stderr = "/tmp/pwd.err"
-value = 50
+stdout = "terminal"
+stderr = { file = "/tmp/pwd.err" }
+value = 25
+
+[[job]]
+cmd = "cat /dev/null"
+stdout = "none"
+#sterr = "none" is implied
+value = 25
