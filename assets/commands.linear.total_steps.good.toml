@@ -1,0 +1,30 @@
+[details]
+name = "Splat"
+
+[details.shape]
+select   = "Linear"
+steps    = 128
+parallel =  8
+
+
+[[job]]
+cmd = "ls"
+stdout = "terminal"
+stderr = "none"
+value = 64
+
+[[job]]
+cmd = "ls"
+stdout = "terminal"
+#stderr = "none" is implied
+value = 32
+
+[[job]]
+cmd = "ls"
+stdout = { file = "/tmp/ls.out" }
+value = 16
+
+[[job]]
+cmd = "ls"
+stdout = { both = "/tmp/ls.out" } # file and terminal
+value = 16

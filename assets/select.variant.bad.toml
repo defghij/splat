@@ -1,0 +1,12 @@
+[details]
+name = "Splat"
+logging = true
+
+[details.shape]
+select = "Randomized"
+steps = 64
+
+
+[[command]]
+cmd = "ls"
+
